@@ -1,0 +1,2 @@
+# Os insumos devem manter os bytes e finais de linha recebidos em qualquer SO.
+data/raw/** -text
