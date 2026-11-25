@@ -55,6 +55,28 @@ def test_select_current_events_keeps_only_the_latest_event_version() -> None:
     assert result.occurrences[0].source_record == 1
 
 
+def test_latest_event_version_does_not_depend_on_input_order() -> None:
+    old = make_event(amount="15000.00", source_record=1)
+    corrected = make_event(
+        amount="15500.00",
+        updated_at="2025-03-11T12:00:00+00:00",
+        source_record=9,
+    )
+
+    result = select_current_events([corrected, old])
+
+    assert result.current == (corrected,)
+    assert result.occurrences[0].source_record == 1
+
+
+def test_conflicting_versions_with_same_update_time_are_not_guessed() -> None:
+    first = make_event(amount="15000.00", source_record=1)
+    conflicting = make_event(amount="15500.00", source_record=9)
+
+    with pytest.raises(ValueError):
+        select_current_events([first, conflicting])
+
+
 @pytest.mark.parametrize(
     ("event_type", "expected"),
     [
