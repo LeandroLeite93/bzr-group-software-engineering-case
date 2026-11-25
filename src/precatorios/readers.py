@@ -1,16 +1,24 @@
 """Leitura dos arquivos sem alterar os insumos."""
 
 import csv
+from datetime import date
 from decimal import Decimal
 import io
 import json
 from pathlib import Path
 
-from precatorios.models import TribunalRecord
+from precatorios.models import HubRecord, PresentationRecord, TribunalRecord
 from precatorios.normalization import parse_money
 
 
 _TRIBUNAL_FIELDS = {"numero_processo", "ente_devedor", "valor_face"}
+_HUB_FIELDS = {
+    "processo",
+    "ente",
+    "valor_face",
+    "apresentado_em",
+    "prazo_pagamento",
+}
 
 
 def _reject_json_constant(value: str) -> None:
@@ -61,6 +69,60 @@ def read_tribunal(path: Path) -> list[TribunalRecord]:
                 debtor_entity=debtor_entity.strip(),
                 face_value=parse_money(face_value),
                 source_line=reader.line_num,
+            )
+        )
+    return records
+
+
+def read_hub(path: Path) -> list[HubRecord]:
+    """Lê a exportação UTF-8 do Hub."""
+
+    with path.open(encoding="utf-8", newline="") as source:
+        reader = csv.DictReader(source)
+        if reader.fieldnames is None or set(reader.fieldnames) != _HUB_FIELDS:
+            raise ValueError("cabeçalho inesperado no CSV do Hub")
+
+        records: list[HubRecord] = []
+        for row in reader:
+            if any(row[field] is None for field in _HUB_FIELDS):
+                raise ValueError(f"linha {reader.line_num} incompleta no CSV do Hub")
+            try:
+                reported_deadline = date.fromisoformat(row["prazo_pagamento"])
+            except ValueError as error:
+                raise ValueError(
+                    f"prazo inválido na linha {reader.line_num} do CSV do Hub"
+                ) from error
+
+            records.append(
+                HubRecord(
+                    process_number=row["processo"].strip(),
+                    debtor_entity=row["ente"].strip(),
+                    face_value=parse_money(row["valor_face"]),
+                    presented_at=row["apresentado_em"].strip(),
+                    reported_deadline=reported_deadline,
+                    source_line=reader.line_num,
+                )
+            )
+    return records
+
+
+def read_presentations(path: Path) -> list[PresentationRecord]:
+    """Lê as apresentações preservando a representação recebida."""
+
+    raw_records = read_json_records(path)
+    records: list[PresentationRecord] = []
+    for source_record, raw_record in enumerate(raw_records, start=1):
+        process_number = raw_record.get("processo")
+        presented_at = raw_record.get("apresentado_em")
+        if not isinstance(process_number, str) or not isinstance(presented_at, str):
+            raise ValueError(
+                f"registro {source_record} inválido em apresentacoes.json"
+            )
+        records.append(
+            PresentationRecord(
+                process_number=process_number,
+                presented_at=presented_at,
+                source_record=source_record,
             )
         )
     return records

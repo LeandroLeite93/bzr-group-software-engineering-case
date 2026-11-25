@@ -22,6 +22,8 @@ def normalize_process_number(raw_value: object) -> str:
         raise TypeError("o número do processo deve ser texto")
 
     value = raw_value.strip()
+    if not value:
+        raise ValueError("o número do processo não pode ser vazio")
     formatted_match = _FORMATTED_PROCESS.fullmatch(value)
     if formatted_match:
         return value
@@ -56,6 +58,8 @@ def entity_match_key(raw_value: object) -> str:
 def parse_money(raw_value: object) -> Decimal:
     """Converte uma representação monetária segura para Decimal."""
 
+    if raw_value is None:
+        raise ValueError("o valor monetário não pode ser nulo")
     if isinstance(raw_value, bool) or isinstance(raw_value, float):
         raise TypeError("valores monetários binários não são aceitos")
 
@@ -65,6 +69,8 @@ def parse_money(raw_value: object) -> Decimal:
         value = Decimal(raw_value)
     elif isinstance(raw_value, str):
         text = raw_value.strip()
+        if not text:
+            raise ValueError("o valor monetário não pode ser vazio")
         if _BRAZILIAN_MONEY.fullmatch(text):
             text = text.replace(".", "").replace(",", ".")
         elif not _DECIMAL_MONEY.fullmatch(text):
