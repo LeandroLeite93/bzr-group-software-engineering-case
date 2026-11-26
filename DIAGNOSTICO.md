@@ -418,3 +418,170 @@ registrados em `data/raw/SHA256SUMS`. Todo resultado é escrito em outra pasta.
 Os valores de face acima seguem provisoriamente o tribunal quando o processo está
 presente nele e o Hub quando ele é a única fonte. Essa escolha não resolve as
 pendências de negócio; apenas permite produzir uma base operacional rastreável.
+
+## Propostas de prevenção
+
+### Processo operacional
+
+1. **Preservar o arquivo recebido.** O anexo deve entrar diretamente em uma área
+   somente leitura. Nome, origem, horário de recebimento, tamanho e SHA-256 devem
+   ser registrados antes de qualquer interpretação.
+2. **Eliminar o salvamento intermediário no Excel.** O operador pode consultar
+   uma cópia ou um relatório, mas o arquivo usado pela importação deve ser o anexo
+   original. Assim é possível atribuir um defeito ao produtor ou ao consumidor.
+3. **Formalizar e versionar o contrato.** Tribunal e operação devem aprovar
+   codificação, delimitador, casas decimais, tipos permitidos, fuso e semântica de
+   atualização. Uma mudança de leiaute precisa gerar uma nova versão, não uma
+   variação silenciosa dentro da versão 2.1.
+4. **Automatizar a conciliação semanal.** O resultado deve separar:
+   conciliados, diferenças apenas cosméticas, conflitos de negócio e registros
+   presentes em somente uma fonte.
+5. **Definir responsável e prazo para pendências.** Cada conflito precisa de
+   responsável, estado, comentário e data de resolução. Pendência sem dono volta a
+   ser um descarte silencioso com outro nome.
+6. **Alertar pelo resultado, não apenas por falha técnica.** Um lote pode terminar
+   como `concluido`, `concluido_com_pendencias` ou `falhou`. Eventos rejeitados,
+   divergências novas ou ausência do arquivo esperado devem gerar alerta.
+7. **Acompanhar indicadores.** No mínimo: lotes recebidos, atraso do último lote,
+   registros aplicados, duplicados, substituídos, rejeitados e tempo das
+   pendências abertas.
+
+### Script de importação
+
+O importador deve seguir uma sequência determinística:
+
+1. calcular o SHA-256 e tentar criar o lote com uma chave idempotente formada por
+   origem e hash;
+2. se o lote já estiver concluído, encerrar com sucesso sem aplicar valores outra
+   vez;
+3. armazenar cada objeto JSON original antes de validá-lo;
+4. normalizar somente representações conhecidas, preservando o valor de origem;
+5. validar campos obrigatórios, processo, dinheiro, data, tipo e fuso;
+6. agrupar por `evento_id` e selecionar a maior versão por `atualizado_em`;
+7. tratar repetição idêntica como operação sem efeito;
+8. colocar em pendência versões diferentes com o mesmo `atualizado_em`;
+9. aplicar o evento com `INSERT ... ON CONFLICT`, condicionado a uma versão mais
+   recente;
+10. concluir o lote com contagens e enviar o resumo à operação.
+
+Dinheiro deve usar decimal exato. O valor do evento deve continuar positivo; o
+tipo define se seu efeito é positivo ou negativo. O total pago não deve ser um
+acumulador incrementado pelo script, mas uma soma derivada dos eventos vigentes.
+
+Cada registro pode falhar isoladamente sem interromper os demais, desde que a
+falha seja persistida e comunicada. Erros do arquivo inteiro, como JSON inválido
+ou cabeçalho desconhecido, devem falhar o lote: continuar nesse caso poderia
+produzir uma importação estruturalmente incorreta.
+
+Os testes automatizados devem cobrir, no mínimo:
+
+- reexecução do mesmo arquivo;
+- sobreposição entre arquivos de janelas de sete dias;
+- duplicata exata e correção posterior;
+- conflito no mesmo `atualizado_em`;
+- pagamento e estorno;
+- valores nulos, negativos e com formatos alternativos;
+- processo com e sem pontuação;
+- 2 e 3 de abril em diferentes fusos;
+- CSV documentado e CSV efetivamente recebido;
+- falha parcial seguida de nova execução.
+
+### Banco de dados
+
+A migração proposta está em
+[`sql/001_prevent_data_quality_issues.sql`](sql/001_prevent_data_quality_issues.sql).
+Ela implementa as seguintes barreiras:
+
+- `evento_id` único na tabela de pagamentos;
+- `atualizado_em` e lote de origem obrigatórios;
+- lote identificado por origem e SHA-256;
+- armazenamento do payload recebido, inclusive quando rejeitado;
+- status e motivo de cada registro;
+- processo no formato CNJ canônico de 25 caracteres;
+- constraints para processo, ente e valores;
+- data de apresentação separada de instante e prazo gerado pelo banco;
+- total pago calculado por uma view, com estorno negativo;
+- índices para consulta por processo, lote, estado e evento.
+
+A migração aborta se encontrar `evento_id` duplicado ou processo legado que não
+possa ser normalizado com segurança. Isso é intencional: migração de estrutura não
+deve decidir qual pagamento apagar. Os conflitos devem passar primeiro pela
+limpeza e por aprovação da operação.
+
+Como o schema antigo não guarda `atualizado_em`, a migração associa os registros
+existentes a um lote técnico e usa `criado_em` como marcador legado. Esse valor não
+deve ser apresentado como horário fornecido pelo tribunal.
+
+`data_apresentacao` permanece inicialmente opcional porque o schema atual não
+possui essa informação. Depois do backfill conciliado, uma segunda migração deve
+torná-la obrigatória caso todo precatório ativo realmente precise ter uma data.
+
+### Entrada em produção
+
+1. Fazer backup e extrair uma fotografia dos totais atuais.
+2. Executar a limpeza em modo sombra, sem escrever no banco de produção.
+3. Resolver as decisões bloqueadoras listadas abaixo.
+4. Comparar os totais por processo e aprovar formalmente as correções.
+5. Executar as validações iniciais da migração.
+6. Migrar primeiro em homologação e testar reprocessamento e falha parcial.
+7. Ativar o novo importador com monitoramento e possibilidade de retorno.
+8. Manter a conciliação antiga apenas para conferência durante um período curto
+   e depois retirá-la, evitando duas fontes operacionais permanentes.
+
+## Dúvidas antes de colocar a limpeza em produção
+
+### Para o tribunal
+
+1. Qual é o leiaute vigente de fato? O CSV deve ser ISO-8859-1 com `;` e decimal
+   brasileiro, ou o arquivo enviado está fora da versão 2.1?
+2. `evento_id` é único globalmente, por tribunal ou apenas dentro de um arquivo?
+3. Uma nova ocorrência do mesmo `evento_id` substitui integralmente a anterior?
+   Pode haver exclusão ou cancelamento sem um evento de estorno?
+4. Qual é a semântica oficial de `estorno`? Seu valor deve chegar positivo com o
+   sinal definido pelo tipo?
+5. Um `pagamento` negativo deve ser rejeitado ou significa um estorno enviado com
+   tipo incorreto? Como recuperar o valor nulo de `ev-004`?
+6. Qual fuso define a data jurídica de apresentação? Um instante em UTC deve ser
+   convertido para o fuso do tribunal antes de aplicar o corte de 2 de abril?
+7. A lista semanal é uma fotografia completa ou apenas um conjunto de alterações?
+   A ausência de um processo significa exclusão?
+8. Eventos podem chegar com mais de sete dias de atraso? Por quanto tempo um
+   evento anterior ainda pode ser corrigido?
+9. Os dígitos verificadores CNJ devem ser validados na integração? Os números
+   fictícios deste case não passam nessa validação, por isso a limpeza atual valida
+   a estrutura, mas não rejeita pelo dígito.
+
+### Para a operação
+
+1. Em conflitos cadastrais, qual sistema é a fonte oficial para ente devedor e
+   valor de face? A precedência provisória dada ao tribunal está correta?
+2. Qual é a decisão para o processo `0023456-21.2020.8.26.0053`: R$ 30.000,00 ou
+   R$ 31.000,00?
+3. Qual é o ente correto de `0045678-43.2021.5.02.0011`: `União` ou
+   `Município de Santos`?
+4. Por que `0056789-54.2017.4.03.6100` está somente no Hub e
+   `0067890-65.2016.8.26.0053` somente no tribunal? Eles devem permanecer ativos?
+5. O prazo deve usar `America/Sao_Paulo`? A data do Hub foi calculada antes ou
+   depois de converter o instante para esse fuso?
+6. Existem pagamentos históricos fora dos arquivos fornecidos? Qual total atual
+   por processo deve ser usado como ponto de reconciliação?
+7. Pagamento líquido negativo ou superior ao valor de face é permitido, ou deve
+   abrir uma pendência?
+8. Quem pode aprovar uma divergência e qual é o prazo esperado para resolvê-la?
+9. Por quanto tempo arquivos originais, payloads e rejeições devem ser mantidos?
+   Há requisitos de acesso ou proteção de dados para esses arquivos?
+10. O operador precisa corrigir registros por uma interface, ou a correção deve
+    sempre vir em um novo arquivo do tribunal?
+
+### Decisões bloqueadoras
+
+Antes da escrita em produção, considero obrigatório confirmar:
+
+- autoridade para ente devedor e valor de face;
+- semântica de versão do `evento_id`;
+- sinal e representação de estornos;
+- fuso usado no corte de 2 de abril;
+- significado de ausência na lista semanal;
+- destino dos três eventos de pagamento em quarentena;
+- resolução dos dois conflitos cadastrais e dos dois processos presentes em
+  apenas uma fonte.
