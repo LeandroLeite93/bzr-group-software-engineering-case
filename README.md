@@ -11,10 +11,30 @@ O diagnóstico completo, com evidências e impactos, está em
 ## Requisitos
 
 - Python 3.10 ou mais recente;
-- nenhuma dependência externa em tempo de execução;
+- Git, caso o projeto seja obtido por clone;
+- dependências de execução instaladas automaticamente pelo `pip`;
 - `pytest` para executar os testes.
 
-## Instalação
+No Windows, a instalação inclui automaticamente o pacote `tzdata`, necessário
+para resolver o fuso `America/Sao_Paulo`. macOS e Linux usam a base de fusos do
+sistema operacional.
+
+PostgreSQL não é necessário para executar a limpeza. O arquivo em `sql/` é uma
+proposta de evolução do banco descrito no case.
+
+## Obter o projeto
+
+Por HTTPS:
+
+```bash
+git clone https://github.com/LeandroLeite93/bzr-group-software-engineering-case.git
+cd bzr-group-software-engineering-case
+```
+
+Também é possível baixar o ZIP pelo GitHub, extraí-lo e abrir o terminal na pasta
+que contém este README.
+
+## Instalação no macOS ou Linux
 
 ```bash
 python3 -m venv .venv
@@ -22,16 +42,69 @@ source .venv/bin/activate
 python -m pip install '.[dev]'
 ```
 
-## Execução
+## Instalação no Windows
+
+No PowerShell:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install ".[dev]"
+```
+
+No Prompt de Comando (`cmd.exe`), a ativação equivalente é:
+
+```bat
+.venv\Scripts\activate.bat
+```
+
+Se a política corporativa do PowerShell bloquear `Activate.ps1`, não é preciso
+alterá-la. Use diretamente o Python do ambiente virtual:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install ".[dev]"
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m precatorios --raw-dir data/raw --output-dir output
+```
+
+Todos os comandos seguintes são iguais nos três sistemas depois da ativação do
+ambiente virtual.
+
+## Execução rápida
 
 Com o ambiente virtual ativo:
+
+```bash
+python -m pytest
+python -m precatorios --raw-dir data/raw --output-dir output
+python -m pytest tests/test_source_integrity.py
+```
+
+Resultados esperados:
+
+```text
+39 passed
+6 precatórios gerados
+8 eventos de pagamento aceitos
+9 pendências registradas
+17 ocorrências auditadas
+1 passed no teste isolado de integridade
+```
+
+O comando instalado `precatorios-cleaner` é uma alternativa equivalente a
+`python -m precatorios`:
 
 ```bash
 precatorios-cleaner --raw-dir data/raw --output-dir output
 ```
 
-Os dois argumentos são opcionais; o comando acima mostra seus valores padrão. O
-programa não altera os arquivos em `data/raw` e gera novamente:
+Os argumentos são opcionais. A execução abaixo usa as mesmas pastas padrão:
+
+```bash
+python -m precatorios
+```
+
+O programa não altera os arquivos em `data/raw` e gera novamente:
 
 - `output/precatorios.csv`: cadastro conciliado, prazo e saldo;
 - `output/pagamentos.csv`: eventos válidos, vigentes e deduplicados;
@@ -55,8 +128,22 @@ duplicatas, versões de evento, estornos e execução completa do pipeline.
 A integridade dos arquivos originais também pode ser conferida separadamente:
 
 ```bash
-shasum -a 256 -c data/raw/SHA256SUMS
+python -m pytest tests/test_source_integrity.py
 ```
+
+Esse comando é multiplataforma. Como verificação opcional pelo sistema
+operacional, use `shasum -a 256 -c data/raw/SHA256SUMS` no macOS ou
+`sha256sum -c data/raw/SHA256SUMS` no Linux.
+
+## Solução de problemas
+
+- Confirme a versão com `python --version`; ela deve ser 3.10 ou mais recente.
+- Confirme que o ambiente está ativo. O terminal normalmente exibe `(.venv)`.
+- Se `precatorios-cleaner` não estiver no `PATH`, use
+  `python -m precatorios`, que executa o mesmo programa.
+- Execute os comandos a partir da pasta que contém `pyproject.toml`.
+- Para recriar as saídas, basta executar o pipeline novamente; não é necessário
+  apagar a pasta `output`.
 
 ## Decisões conservadoras
 
